@@ -15,7 +15,7 @@ def test_generate_payload_modes(config, mock_rf):
     config.tx_buffer_samples = 4096
     engine = AttackEngine(mock_rf, config)
 
-    for mode in ("noise", "chirp", "both", "brute"):
+    for mode in ("noise", "chirp", "both", "brute", "ultra"):
         config.payload_mode = mode
         buf = engine.generate_payload(4096)
         assert buf.dtype == np.complex64
@@ -29,5 +29,8 @@ def test_build_config_jam_with_channel_code():
     config = build_config(parse_arguments(["--mode", "jam", "-ch", "433"]))
 
     assert config.target_frequency_hz == 433_920_000
-    assert config.payload_mode == "both"
-    assert config.tx_buffer_samples == 32768
+    assert config.payload_mode == "ultra"
+    assert config.ultra_brute is True
+    assert config.jam_refresh_buffers is True
+    assert config.brute_freq_dither_hz >= 200_000
+    assert config.tx_gain == 60

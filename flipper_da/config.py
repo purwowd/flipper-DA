@@ -89,3 +89,20 @@ class SystemConfig:
     payload_mode: str = "both"
     tx_buffer_samples: int = 32768
     jam_duration_sec: float = 0.0  # 0 = until Ctrl+C
+    ultra_brute: bool = False
+    jam_refresh_buffers: bool = False  # regen noise/chirp every TX chunk
+
+
+def apply_jam_ultra_preset(config: SystemConfig) -> SystemConfig:
+    """Max-aggression defaults for --mode jam (lab use only)."""
+    config.ultra_brute = True
+    config.jam_refresh_buffers = True
+    config.payload_mode = "ultra"
+    config.brute_freq_dither_hz = max(config.brute_freq_dither_hz, 200_000)
+    config.brute_chunk_sec = min(config.brute_chunk_sec, 0.02)
+    config.brute_sweep_bandwidth_hz = max(config.brute_sweep_bandwidth_hz, 1_500_000)
+    config.noise_amplitude = 1.0
+    config.bandwidth = max(config.bandwidth, 1_500_000)
+    config.tx_gain = max(config.tx_gain, 60)
+    config.brute_pll_settle_sec = 0.0005
+    return config

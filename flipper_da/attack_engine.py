@@ -80,9 +80,41 @@ class AttackEngine:
         if mode == "both":
             self.logger.debug("Payload: hybrid noise+chirp (%s samples)", num_samples)
             return normalize_signal(noise * 0.6 + chirp * 0.3, peak=0.99)
+        if mode == "ultra":
+            return self._generate_ultra_payload(num_samples, t, noise, chirp, bw)
 
         duration_sec = num_samples / srate
         return self.build_brute_signal(duration_sec)
+
+    def _generate_ultra_payload(
+        self,
+        num_samples: int,
+        t: np.ndarray,
+        noise: np.ndarray,
+        chirp: np.ndarray,
+        bw: float,
+    ) -> np.ndarray:
+        """Maximum mash: noise + chirp + swept noise + multi-tone at full scale."""
+        duration_sec = num_samples / self.config.sample_rate
+        sweep_bw = min(bw, self.config.brute_sweep_bandwidth_hz)
+        freq_sweep = (t / max(duration_sec, 1e-6) - 0.5) * sweep_bw
+        sweep_phase = 2 * np.pi * np.cumsum(freq_sweep) / self.config.sample_rate
+        sweep_noise = noise * np.exp(1j * sweep_phase)
+
+        tone_lo = np.exp(-1j * 2 * np.pi * 100_000 * t).astype(np.complex64)
+        tone_mid = np.exp(1j * 2 * np.pi * 0 * t).astype(np.complex64)
+        tone_hi = np.exp(1j * 2 * np.pi * 100_000 * t).astype(np.complex64)
+
+        mixed = (
+            0.35 * noise
+            + 0.30 * chirp
+            + 0.25 * sweep_noise
+            + 0.04 * tone_lo
+            + 0.03 * tone_mid
+            + 0.03 * tone_hi
+        )
+        self.logger.debug("Payload: ULTRA (%s samples, bw=%.0f Hz)", num_samples, sweep_bw)
+        return normalize_signal(mixed, peak=0.99)
 
     def _tx_buffer_samples(self) -> int:
         chunk_samples = int(self.config.sample_rate * max(0.02, self.config.brute_chunk_sec))
@@ -105,6 +137,16 @@ class AttackEngine:
         dither = self.config.brute_freq_dither_hz
         if dither <= 0:
             return [0]
+        if self.config.ultra_brute:
+            return [
+                -dither,
+                -dither * 2 // 3,
+                -dither // 3,
+                0,
+                dither // 3,
+                dither * 2 // 3,
+                dither,
+            ]
         return [-dither, -dither // 2, 0, dither // 2, dither]
 
     def _set_tx_frequency(self, frequency_hz: int) -> bool:
@@ -137,8 +179,10 @@ class AttackEngine:
         }
 
         verify_interval = self.config.brute_verify_interval_sec
+        ultra_tag = " ULTRA" if self.config.ultra_brute else ""
         self.logger.warning(
-            "BRUTE CONTINUOUS LOCK %.3f MHz ±%d kHz — TX gapless (verify every %s)",
+            "BRUTE CONTINUOUS LOCK%s %.3f MHz ±%d kHz — TX gapless (verify every %s)",
+            ultra_tag,
             frequency_hz / 1e6,
             self.config.brute_freq_dither_hz // 1000,
             f"{verify_interval:.0f}s" if verify_interval > 0 else "never (Ctrl+C to stop)",
@@ -158,7 +202,8 @@ class AttackEngine:
 
             last_verify = time.monotonic()
             chunk_idx = 0
-            tx_buffer = self.generate_payload(self._tx_buffer_samples())
+            buf_samples = self._tx_buffer_samples()
+            tx_buffer = self.generate_payload(buf_samples)
             deadline = (
                 time.monotonic() + self.config.jam_duration_sec
                 if self.config.jam_duration_sec > 0
@@ -174,6 +219,9 @@ class AttackEngine:
                 tx_freq = frequency_hz + offset
                 if offset != 0:
                     self._set_tx_frequency(tx_freq)
+
+                if self.config.jam_refresh_buffers or self.config.ultra_brute:
+                    tx_buffer = self.generate_payload(buf_samples)
 
                 if not self.rf.transmit_samples(tx_buffer):
                     result["error"] = "Transmission failed during continuous brute"

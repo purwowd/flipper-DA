@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import datetime
 
-from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig, resolve_channel_frequencies
+from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig, apply_jam_ultra_preset, resolve_channel_frequencies
 from flipper_da.logging_setup import setup_logging
 from flipper_da.system import FlipperAttackSystem
 
@@ -73,9 +73,9 @@ Unauthorized transmission on radio frequencies is illegal.
     )
     parser.add_argument(
         "--payload-mode",
-        choices=["noise", "chirp", "both", "brute"],
+        choices=["noise", "chirp", "both", "brute", "ultra"],
         default="both",
-        help="TX waveform: noise / chirp / both (B210-style) / brute (multi-tone)",
+        help="TX waveform: noise/chirp/both/ultra (max)/brute",
     )
     parser.add_argument(
         "--bufsize",
@@ -163,6 +163,12 @@ Unauthorized transmission on radio frequencies is illegal.
         help="RX verify interval in seconds, 0=never (default: 0, jam until Ctrl+C)",
     )
     parser.add_argument(
+        "--no-ultra",
+        action="store_true",
+        help="Disable ultra brute preset in jam mode (weaker payload/dither)",
+    )
+
+    parser.add_argument(
         "--tx-gain",
         type=int,
         default=None,
@@ -198,12 +204,13 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         brute_verify = 0.0
         brute_dither = max(brute_dither, 100_000)
         brute_chunk = min(brute_chunk, 0.05)
-        payload_mode = args.payload_mode if args.payload_mode != "brute" else "both"
         jam_duration = args.duration if args.duration is not None else 0.0
         if args.tx_gain is None and args.gain == 40:
             tx_gain = 60
+        if args.payload_mode not in ("both", "ultra"):
+            payload_mode = args.payload_mode
 
-    return SystemConfig(
+    config = SystemConfig(
         detection_threshold_db=args.threshold,
         attack_duration_sec=args.duration if args.duration is not None else 3.0,
         scan_step_hz=args.scan_step,
@@ -227,6 +234,11 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         tx_buffer_samples=args.bufsize,
         jam_duration_sec=jam_duration,
     )
+
+    if args.mode == "jam" and not args.no_ultra:
+        apply_jam_ultra_preset(config)
+
+    return config
 
 
 def main(argv: list[str] | None = None) -> int:
