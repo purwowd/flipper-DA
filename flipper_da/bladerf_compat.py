@@ -10,14 +10,55 @@ from flipper_da.config import SystemConfig
 # libbladeRF C API constants for SISO streams
 BLADERF_RX_X1 = 0
 BLADERF_TX_X1 = 1
+BLADERF_FORMAT_SC16_Q11 = 0
+
+
+class EnumValue:
+    """Minimal enum-like wrapper for bindings that call `.value` on sync args."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: int):
+        self.value = value
+
+
+def ensure_enum_like(value: Any) -> Any:
+    if hasattr(value, "value"):
+        return value
+    if isinstance(value, int):
+        return EnumValue(value)
+    return value
+
+
+def _resolve_internal_module(bladerf_module: Any) -> Any | None:
+    for attr in ("_bladerf", "bladerf", "_BladeRF"):
+        submodule = getattr(bladerf_module, attr, None)
+        if submodule is not None and (
+            hasattr(submodule, "ChannelLayout") or hasattr(submodule, "Direction")
+        ):
+            return submodule
+
+    try:
+        import bladerf._bladerf as internal  # type: ignore
+
+        return internal
+    except Exception:
+        return None
 
 
 def get_sc16_format(bladerf_module: Any) -> Any:
+    internal = _resolve_internal_module(bladerf_module)
+
+    if internal is not None and hasattr(internal, "Format"):
+        return internal.Format.SC16_Q11
+
     if hasattr(bladerf_module, "Format"):
         return bladerf_module.Format.SC16_Q11
+
     if hasattr(bladerf_module, "BLADERF_FORMAT_SC16_Q11"):
-        return bladerf_module.BLADERF_FORMAT_SC16_Q11
-    return 0
+        return ensure_enum_like(bladerf_module.BLADERF_FORMAT_SC16_Q11)
+
+    return ensure_enum_like(BLADERF_FORMAT_SC16_Q11)
 
 
 def get_sync_layout(bladerf_module: Any, direction: str) -> Any:
@@ -25,8 +66,17 @@ def get_sync_layout(bladerf_module: Any, direction: str) -> Any:
     Resolve sync_config layout for RX or TX across binding versions.
 
     Modern bindings expose ChannelLayout.RX_X1 / TX_X1.
-    Older bindings expose Direction.RX / TX or raw module constants.
+    Some installs only export enums from the internal `_bladerf` module.
     """
+    internal = _resolve_internal_module(bladerf_module)
+
+    if internal is not None and hasattr(internal, "ChannelLayout"):
+        return (
+            internal.ChannelLayout.RX_X1
+            if direction == "rx"
+            else internal.ChannelLayout.TX_X1
+        )
+
     if hasattr(bladerf_module, "ChannelLayout"):
         return (
             bladerf_module.ChannelLayout.RX_X1
@@ -34,12 +84,8 @@ def get_sync_layout(bladerf_module: Any, direction: str) -> Any:
             else bladerf_module.ChannelLayout.TX_X1
         )
 
-    try:
-        from bladerf._bladerf import ChannelLayout  # type: ignore
-
-        return ChannelLayout.RX_X1 if direction == "rx" else ChannelLayout.TX_X1
-    except Exception:
-        pass
+    if internal is not None and hasattr(internal, "Direction"):
+        return internal.Direction.RX if direction == "rx" else internal.Direction.TX
 
     if hasattr(bladerf_module, "Direction"):
         return (
@@ -48,13 +94,14 @@ def get_sync_layout(bladerf_module: Any, direction: str) -> Any:
             else bladerf_module.Direction.TX
         )
 
-    return BLADERF_RX_X1 if direction == "rx" else BLADERF_TX_X1
+    raw = BLADERF_RX_X1 if direction == "rx" else BLADERF_TX_X1
+    return ensure_enum_like(raw)
 
 
 def sync_config(device: Any, bladerf_module: Any, direction: str, config: SystemConfig) -> None:
     """Call device.sync_config with the correct layout and argument count."""
-    layout = get_sync_layout(bladerf_module, direction)
-    fmt = get_sc16_format(bladerf_module)
+    layout = ensure_enum_like(get_sync_layout(bladerf_module, direction))
+    fmt = ensure_enum_like(get_sc16_format(bladerf_module))
 
     try:
         device.sync_config(
@@ -95,14 +142,23 @@ def set_channel_enabled(
 
 
 def describe_binding(bladerf_module: Any) -> str:
-    if hasattr(bladerf_module, "ChannelLayout"):
+    internal = _resolve_internal_module(bladerf_module)
+
+    if hasattr(bladerf_module, "ChannelLayout") or (
+        internal is not None and hasattr(internal, "ChannelLayout")
+    ):
         api = "modern (ChannelLayout)"
-    elif hasattr(bladerf_module, "Direction"):
+    elif hasattr(bladerf_module, "Direction") or (
+        internal is not None and hasattr(internal, "Direction")
+    ):
         api = "legacy (Direction)"
     else:
-        api = "unknown"
+        api = "wrapped-constants"
 
     version = getattr(bladerf_module, "__version__", "unknown")
+    internal_name = getattr(internal, "__name__", None) if internal is not None else None
+    if internal_name:
+        return f"bladerf binding: {api}, version={version}, internal={internal_name}"
     return f"bladerf binding: {api}, version={version}"
 
 
