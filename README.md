@@ -31,21 +31,28 @@ Install BladeRF drivers/bindings from Nuand documentation before running on hard
 
 ## Usage
 
-### Auto mode (default) — autodetect + auto-attack loop
+### Auto mode (default) — autodetect + brute lock-on jam
 
-Runs continuously: scan for RF signals, auto-attack the strongest targets, repeat.
-Stop with `Ctrl+C`.
+Runs continuously with **brute mode** enabled by default:
+1. Detect target frequency
+2. **Lock** and transmit continuously for `--brute-hold` seconds (default 15s)
+3. Verify — if target still active, **re-attack immediately** (no idle gap)
+4. Release lock only when signal drops below threshold
 
 ```bash
-python attack.py
-# same as:
 python attack.py --mode auto
 ```
 
-Limit cycles and tune behavior:
+Max aggression (lab only):
 
 ```bash
-python attack.py --mode auto --auto-cycles 10 --auto-interval 3 --auto-targets 3
+python attack.py --brute-hold 30 --brute-chunk 0.1 --tx-gain 60 --gain 50
+```
+
+Disable brute (short burst attacks instead):
+
+```bash
+python attack.py --no-brute
 ```
 
 Autodetect uses a **quick scan** of common Flipper frequencies first (315, 433.92, 868, 915 MHz),

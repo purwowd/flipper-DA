@@ -149,7 +149,15 @@ class FlipperAttackSystem:
     def run_auto_loop(self) -> Dict[str, Any]:
         """
         Continuous autodetect -> auto-attack loop until Ctrl+C or max cycles.
+
+        In brute mode, locks onto a frequency and re-jams immediately if the
+        target is still present after each hold period (no idle gap).
         """
+        if self.config.enable_brute_mode:
+            return self._run_brute_auto_loop()
+        return self._run_standard_auto_loop()
+
+    def _run_standard_auto_loop(self) -> Dict[str, Any]:
         start_time = datetime.now()
         summary: Dict[str, Any] = {
             "mode": "auto",
@@ -220,6 +228,120 @@ class FlipperAttackSystem:
 
         except KeyboardInterrupt:
             self.logger.info("Auto mode stopped by user after %s cycle(s)", cycle_num)
+
+        summary["end_time"] = datetime.now().isoformat()
+        summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
+        return summary
+
+    def _run_brute_auto_loop(self) -> Dict[str, Any]:
+        """Brute auto loop: lock frequency and hammer until suppressed."""
+        start_time = datetime.now()
+        summary: Dict[str, Any] = {
+            "mode": "auto-brute",
+            "start_time": start_time.isoformat(),
+            "cycle_count": 0,
+            "total_detections": 0,
+            "total_attacks": 0,
+            "successful_attacks": 0,
+            "failed_attacks": 0,
+            "lock_events": 0,
+            "suppression_events": 0,
+            "cycles": [],
+        }
+
+        cycle_num = 0
+        locked_frequency: int | None = None
+
+        self.logger.info(
+            "BRUTE AUTO: lock-on sustained jam (hold=%.1fs, chunk=%.2fs, reattack_delay=%.2fs)",
+            self.config.brute_hold_sec,
+            self.config.brute_chunk_sec,
+            self.config.brute_reattack_delay_sec,
+        )
+
+        try:
+            while True:
+                cycle_num += 1
+                if self.config.auto_max_cycles > 0 and cycle_num > self.config.auto_max_cycles:
+                    self.logger.info("Reached max cycles (%s). Stopping.", self.config.auto_max_cycles)
+                    break
+
+                cycle_start = datetime.now()
+                cycle_summary: Dict[str, Any] = {
+                    "cycle": cycle_num,
+                    "start_time": cycle_start.isoformat(),
+                    "locked_frequency": locked_frequency,
+                    "attacks": [],
+                    "suppressed": False,
+                }
+
+                if locked_frequency is None:
+                    self.logger.info("--- Brute cycle %s: scanning for target ---", cycle_num)
+                    self.scan_results = self.run_auto_detection_cycle()
+                    summary["total_detections"] += len(self.scan_results)
+
+                    if not self.scan_results:
+                        self.logger.info(
+                            "No target. Waiting %.1fs before rescan...",
+                            self.config.auto_interval_sec,
+                        )
+                        time.sleep(self.config.auto_interval_sec)
+                        cycle_summary["detection_count"] = 0
+                        summary["cycles"].append(cycle_summary)
+                        summary["cycle_count"] = cycle_num
+                        continue
+
+                    strongest = max(self.scan_results, key=lambda item: item["power_db"])
+                    locked_frequency = strongest["frequency"]
+                    summary["lock_events"] += 1
+                    self.logger.warning(
+                        "BRUTE LOCK acquired: %.3f MHz (%.1f dB)",
+                        strongest["frequency_mhz"],
+                        strongest["power_db"],
+                    )
+
+                attack_result = self.attack_engine.execute_sustained_attack(locked_frequency)
+                self.attack_results = [attack_result]
+                cycle_summary["attacks"] = [attack_result]
+                cycle_summary["locked_frequency"] = locked_frequency
+                summary["total_attacks"] += 1
+                if attack_result.get("success"):
+                    summary["successful_attacks"] += 1
+                else:
+                    summary["failed_attacks"] += 1
+
+                verify_power = self.scanner.scan_frequency(locked_frequency)
+                suppress_threshold = (
+                    self.config.detection_threshold_db - self.config.brute_suppression_margin_db
+                )
+
+                if verify_power is None or verify_power <= suppress_threshold:
+                    self.logger.info(
+                        "Target suppressed at %.3f MHz (verify power: %s dB). Releasing lock.",
+                        locked_frequency / 1e6,
+                        f"{verify_power:.1f}" if verify_power is not None else "n/a",
+                    )
+                    locked_frequency = None
+                    cycle_summary["suppressed"] = True
+                    summary["suppression_events"] += 1
+                else:
+                    self.logger.warning(
+                        "Target still active at %.3f MHz (%.1f dB). Re-attacking immediately.",
+                        locked_frequency / 1e6,
+                        verify_power,
+                    )
+                    if self.config.brute_reattack_delay_sec > 0:
+                        time.sleep(self.config.brute_reattack_delay_sec)
+
+                cycle_summary["end_time"] = datetime.now().isoformat()
+                cycle_summary["duration_seconds"] = (
+                    datetime.now() - cycle_start
+                ).total_seconds()
+                summary["cycles"].append(cycle_summary)
+                summary["cycle_count"] = cycle_num
+
+        except KeyboardInterrupt:
+            self.logger.info("Brute auto mode stopped by user after %s cycle(s)", cycle_num)
 
         summary["end_time"] = datetime.now().isoformat()
         summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()

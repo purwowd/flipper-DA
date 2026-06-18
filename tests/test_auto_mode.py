@@ -39,6 +39,7 @@ def test_scan_auto_detect_falls_back_to_full_scan(config, mock_rf):
 
 
 def test_run_auto_loop_detects_and_attacks(config, mock_rf):
+    config.enable_brute_mode = False
     config.auto_max_cycles = 1
     config.auto_interval_sec = 0.01
     config.attack_duration_sec = 0.001

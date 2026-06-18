@@ -51,3 +51,10 @@ class SystemConfig:
     auto_max_cycles: int = 0  # 0 = run until Ctrl+C
     auto_attack_max_targets: int = 3
     auto_quick_scan: bool = True
+    enable_brute_mode: bool = True
+    brute_hold_sec: float = 15.0
+    brute_chunk_sec: float = 0.2
+    brute_sweep_bandwidth_hz: float = 1_500_000
+    brute_single_target: bool = True
+    brute_reattack_delay_sec: float = 0.0
+    brute_suppression_margin_db: float = 3.0

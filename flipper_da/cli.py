@@ -113,6 +113,29 @@ Unauthorized transmission on radio frequencies is illegal.
         action="store_true",
         help="Disable fast common-frequency autodetect phase",
     )
+    parser.add_argument(
+        "--no-brute",
+        action="store_true",
+        help="Disable brute lock-on sustained jamming (use short burst attacks)",
+    )
+    parser.add_argument(
+        "--brute-hold",
+        type=float,
+        default=15.0,
+        help="Seconds of continuous TX per brute hold (default: 15)",
+    )
+    parser.add_argument(
+        "--brute-chunk",
+        type=float,
+        default=0.2,
+        help="TX chunk size in seconds during brute hold (default: 0.2)",
+    )
+    parser.add_argument(
+        "--tx-gain",
+        type=int,
+        default=None,
+        help="TX gain in dB (default: same as --gain)",
+    )
 
     return parser.parse_args(argv)
 
@@ -126,13 +149,16 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         enable_aggressive_scan=args.aggressive_scan,
         target_frequency_hz=args.freq,
         rx_gain=args.gain,
-        tx_gain=args.gain,
         log_level=args.log_level,
         output_dir=args.output_dir,
         auto_interval_sec=args.auto_interval,
         auto_max_cycles=args.auto_cycles,
         auto_attack_max_targets=args.auto_targets,
         auto_quick_scan=not args.no_quick_scan,
+        enable_brute_mode=not args.no_brute,
+        brute_hold_sec=args.brute_hold,
+        brute_chunk_sec=args.brute_chunk,
+        tx_gain=args.tx_gain if args.tx_gain is not None else args.gain,
     )
 
 
@@ -190,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("Total signals detected: %s", summary.get("total_detections", 0))
             logger.info("Total transmissions: %s", summary.get("total_attacks", 0))
             logger.info("Successful transmissions: %s", summary.get("successful_attacks", 0))
+        elif summary["mode"] == "auto-brute":
+            logger.info("Brute cycles: %s", summary.get("cycle_count", 0))
+            logger.info("Lock events: %s", summary.get("lock_events", 0))
+            logger.info("Suppressions: %s", summary.get("suppression_events", 0))
+            logger.info("Total brute holds: %s", summary.get("total_attacks", 0))
         else:
             if "detection_count" in summary:
                 logger.info("Signals detected: %s", summary["detection_count"])

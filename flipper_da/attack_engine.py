@@ -53,6 +53,19 @@ class AttackEngine:
         tone_samples = self.generate_tone(duration_sec, frequency_offset=50_000)
         return normalize_signal(0.7 * noise_samples + 0.3 * tone_samples)
 
+    def build_brute_signal(self, duration_sec: float) -> np.ndarray:
+        """Wideband aggressive waveform for sustained suppression."""
+        sweep = self.generate_swept_noise(
+            duration_sec,
+            sweep_bandwidth=self.config.brute_sweep_bandwidth_hz,
+        )
+        noise = self.generate_noise(duration_sec)
+        tone_low = self.generate_tone(duration_sec, frequency_offset=-75_000)
+        tone_mid = self.generate_tone(duration_sec, frequency_offset=0.0)
+        tone_high = self.generate_tone(duration_sec, frequency_offset=75_000)
+        mixed = 0.45 * sweep + 0.35 * noise + 0.07 * tone_low + 0.07 * tone_mid + 0.06 * tone_high
+        return normalize_signal(mixed, peak=0.99)
+
     def execute_attack(self, frequency_hz: int, duration_sec: float | None = None) -> Dict[str, Any]:
         if duration_sec is None:
             duration_sec = self.config.attack_duration_sec
@@ -64,6 +77,7 @@ class AttackEngine:
             "start_time": datetime.now().isoformat(),
             "success": False,
             "error": None,
+            "mode": "burst",
         }
 
         self.logger.warning(
@@ -105,6 +119,73 @@ class AttackEngine:
         self.attack_history.append(result)
         return result
 
+    def execute_sustained_attack(
+        self,
+        frequency_hz: int,
+        duration_sec: float | None = None,
+    ) -> Dict[str, Any]:
+        """Continuous chunked TX without switching to RX between chunks."""
+        if duration_sec is None:
+            duration_sec = self.config.brute_hold_sec
+
+        chunk_sec = max(0.05, self.config.brute_chunk_sec)
+        result: Dict[str, Any] = {
+            "frequency": frequency_hz,
+            "frequency_mhz": frequency_hz / 1e6,
+            "duration": duration_sec,
+            "start_time": datetime.now().isoformat(),
+            "success": False,
+            "error": None,
+            "mode": "brute",
+            "chunks_transmitted": 0,
+        }
+
+        self.logger.warning(
+            "BRUTE sustained TX on %.3f MHz for %.1fs (chunk=%.2fs)",
+            frequency_hz / 1e6,
+            duration_sec,
+            chunk_sec,
+        )
+
+        try:
+            if not self.rf.configure_tx():
+                result["error"] = "Failed to configure TX mode"
+                return result
+
+            if not self.rf.set_frequency(frequency_hz):
+                result["error"] = f"Failed to set frequency {frequency_hz}"
+                return result
+
+            deadline = time.monotonic() + duration_sec
+            chunks = 0
+
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                current_chunk = min(chunk_sec, remaining)
+                if current_chunk <= 0:
+                    break
+
+                signal = self.build_brute_signal(current_chunk)
+                if not self.rf.transmit_samples(signal):
+                    result["error"] = "Transmission failed during brute hold"
+                    break
+                chunks += 1
+
+            result["chunks_transmitted"] = chunks
+            result["success"] = chunks > 0 and result["error"] is None
+            result["end_time"] = datetime.now().isoformat()
+            self.rf.configure_rx()
+        except Exception as exc:
+            result["error"] = str(exc)
+            self.logger.error("Brute attack error: %s", exc)
+            try:
+                self.rf.configure_rx()
+            except Exception:
+                self.logger.exception("Failed to recover RX mode after brute attack")
+
+        self.attack_history.append(result)
+        return result
+
     def execute_sequential_attacks(self, frequencies: List[int]) -> List[Dict[str, Any]]:
         results = []
         for freq in frequencies:
@@ -117,6 +198,9 @@ class AttackEngine:
             self.logger.info("No signals detected for transmission")
             return []
 
+        if self.config.enable_brute_mode:
+            return self.execute_brute_attack(detected_signals)
+
         sorted_signals = sorted(detected_signals, key=lambda item: item["power_db"], reverse=True)
         results: List[Dict[str, Any]] = []
 
@@ -124,5 +208,16 @@ class AttackEngine:
             power = signal["power_db"]
             duration = min(5.0, max(1.0, self.config.attack_duration_sec * (1 + (power + 40) / 20)))
             results.append(self.execute_attack(signal["frequency"], duration))
+
+        return results
+
+    def execute_brute_attack(self, detected_signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Jam strongest target with sustained wideband brute force."""
+        sorted_signals = sorted(detected_signals, key=lambda item: item["power_db"], reverse=True)
+        limit = 1 if self.config.brute_single_target else self.config.auto_attack_max_targets
+        results = []
+
+        for signal in sorted_signals[:limit]:
+            results.append(self.execute_sustained_attack(signal["frequency"]))
 
         return results
