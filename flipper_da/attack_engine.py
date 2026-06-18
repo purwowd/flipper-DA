@@ -54,6 +54,40 @@ class AttackEngine:
         tone_samples = self.generate_tone(duration_sec, frequency_offset=50_000)
         return normalize_signal(0.7 * noise_samples + 0.3 * tone_samples)
 
+    def generate_payload(self, num_samples: int) -> np.ndarray:
+        """
+        B210-style payload: white noise, linear chirp, or hybrid.
+        Reference: SoapySDR continuous writeStream with reused CF32 buffer.
+        """
+        srate = self.config.sample_rate
+        t = np.arange(num_samples, dtype=np.float32) / srate
+        noise = (
+            np.random.uniform(-1, 1, num_samples)
+            + 1j * np.random.uniform(-1, 1, num_samples)
+        ).astype(np.complex64)
+
+        bw = min(srate * 0.9, self.config.bandwidth * 0.95)
+        phase = 2 * np.pi * ((-bw / 2) * t + (bw / 2) * t**2)
+        chirp = np.exp(1j * phase).astype(np.complex64)
+
+        mode = self.config.payload_mode
+        if mode == "noise":
+            self.logger.debug("Payload: white noise (%s samples)", num_samples)
+            return normalize_signal(noise, peak=0.99)
+        if mode == "chirp":
+            self.logger.debug("Payload: chirp bomb (%s samples)", num_samples)
+            return normalize_signal(chirp, peak=0.99)
+        if mode == "both":
+            self.logger.debug("Payload: hybrid noise+chirp (%s samples)", num_samples)
+            return normalize_signal(noise * 0.6 + chirp * 0.3, peak=0.99)
+
+        duration_sec = num_samples / srate
+        return self.build_brute_signal(duration_sec)
+
+    def _tx_buffer_samples(self) -> int:
+        chunk_samples = int(self.config.sample_rate * max(0.02, self.config.brute_chunk_sec))
+        return max(self.config.tx_buffer_samples, chunk_samples)
+
     def build_brute_signal(self, duration_sec: float) -> np.ndarray:
         """Wideband aggressive waveform for sustained suppression."""
         sweep = self.generate_swept_noise(
@@ -99,6 +133,7 @@ class AttackEngine:
             "chunks_transmitted": 0,
             "suppressed": False,
             "dither_hz": self.config.brute_freq_dither_hz,
+            "payload_mode": self.config.payload_mode,
         }
 
         verify_interval = self.config.brute_verify_interval_sec
@@ -123,15 +158,24 @@ class AttackEngine:
 
             last_verify = time.monotonic()
             chunk_idx = 0
+            tx_buffer = self.generate_payload(self._tx_buffer_samples())
+            deadline = (
+                time.monotonic() + self.config.jam_duration_sec
+                if self.config.jam_duration_sec > 0
+                else None
+            )
 
             while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    self.logger.info("Jam duration elapsed (%.1fs)", self.config.jam_duration_sec)
+                    break
+
                 offset = dither_offsets[chunk_idx % len(dither_offsets)]
                 tx_freq = frequency_hz + offset
                 if offset != 0:
                     self._set_tx_frequency(tx_freq)
 
-                signal = self.build_brute_signal(chunk_sec)
-                if not self.rf.transmit_samples(signal):
+                if not self.rf.transmit_samples(tx_buffer):
                     result["error"] = "Transmission failed during continuous brute"
                     break
 

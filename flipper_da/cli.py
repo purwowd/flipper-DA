@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import datetime
 
-from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig
+from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig, resolve_channel_frequencies
 from flipper_da.logging_setup import setup_logging
 from flipper_da.system import FlipperAttackSystem
 
@@ -62,6 +62,26 @@ Unauthorized transmission on radio frequencies is illegal.
         "--aggressive-scan",
         action="store_true",
         help="Use finer scan resolution across bands and common frequencies",
+    )
+    parser.add_argument(
+        "-ch",
+        "--channels",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Flipper channel codes: 315 433 868 915 (433 = 433.92 MHz)",
+    )
+    parser.add_argument(
+        "--payload-mode",
+        choices=["noise", "chirp", "both", "brute"],
+        default="both",
+        help="TX waveform: noise / chirp / both (B210-style) / brute (multi-tone)",
+    )
+    parser.add_argument(
+        "--bufsize",
+        type=int,
+        default=32768,
+        help="TX buffer size in samples, reused in continuous jam (default: 32768)",
     )
     parser.add_argument(
         "--freq",
@@ -152,13 +172,25 @@ Unauthorized transmission on radio frequencies is illegal.
     return parser.parse_args(argv)
 
 
+def _resolve_target_frequency(args: argparse.Namespace) -> int | None:
+    if args.freq is not None:
+        return args.freq
+    if args.channels:
+        freqs = resolve_channel_frequencies(args.channels)
+        if freqs:
+            return freqs[0]
+    return None
+
+
 def build_config(args: argparse.Namespace) -> SystemConfig:
-    target_freq = args.freq
+    target_freq = _resolve_target_frequency(args)
     tx_gain = args.tx_gain if args.tx_gain is not None else args.gain
     enable_brute = not args.no_brute
     brute_verify = args.brute_verify_interval
     brute_dither = args.brute_dither
     brute_chunk = args.brute_chunk
+    payload_mode = args.payload_mode
+    jam_duration = 0.0
 
     if args.mode == "jam":
         target_freq = target_freq or JAM_433_MHZ_HZ
@@ -166,6 +198,8 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         brute_verify = 0.0
         brute_dither = max(brute_dither, 100_000)
         brute_chunk = min(brute_chunk, 0.05)
+        payload_mode = args.payload_mode if args.payload_mode != "brute" else "both"
+        jam_duration = args.duration if args.duration > 0 else 0.0
         if args.tx_gain is None and args.gain == 40:
             tx_gain = 60
 
@@ -189,6 +223,9 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         brute_freq_dither_hz=brute_dither,
         brute_verify_interval_sec=brute_verify,
         tx_gain=tx_gain,
+        payload_mode=payload_mode,
+        tx_buffer_samples=args.bufsize,
+        jam_duration_sec=jam_duration,
     )
 
 

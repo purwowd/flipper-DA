@@ -19,8 +19,26 @@ COMMON_FLIPPER_FREQS: List[int] = [
     915_000_000,
 ]
 
+# Sub-GHz channel map (analogous to Wi-Fi CHANNELS in B210 reference scripts)
+FLIPPER_CHANNELS: dict[int, int] = {
+    315: 315_000_000,
+    433: 433_920_000,
+    868: 868_000_000,
+    915: 915_000_000,
+}
+
 # Default full-jam target (433.92 MHz ISM)
-JAM_433_MHZ_HZ: int = 433_920_000
+JAM_433_MHZ_HZ: int = FLIPPER_CHANNELS[433]
+
+
+def resolve_channel_frequencies(channel_codes: List[int]) -> List[int]:
+    """Map Flipper channel codes (315, 433, ...) to center frequencies in Hz."""
+    freqs: List[int] = []
+    for code in channel_codes:
+        freq = FLIPPER_CHANNELS.get(code)
+        if freq is not None:
+            freqs.append(freq)
+    return freqs
 
 
 @dataclass
@@ -67,3 +85,7 @@ class SystemConfig:
     brute_freq_dither_hz: int = 75_000
     brute_pll_settle_sec: float = 0.001
     brute_max_chunks: int = 0  # 0 = unlimited; set in tests to avoid infinite loops
+    # Payload style (inspired by B210 SoapySDR jam reference: noise / chirp / both)
+    payload_mode: str = "both"
+    tx_buffer_samples: int = 32768
+    jam_duration_sec: float = 0.0  # 0 = until Ctrl+C

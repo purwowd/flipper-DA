@@ -31,19 +31,24 @@ Install BladeRF drivers/bindings from Nuand documentation before running on hard
 
 ## Usage
 
-### Full jam 433.92 MHz (no scan)
+### Full jam 433.92 MHz (B210-style continuous TX)
 
-Continuous wideband jam **only** on 433.92 MHz until `Ctrl+C`:
-
-```bash
-python attack.py --mode jam
-```
-
-Same as:
+Inspired by SoapySDR/B210 Wi-Fi jam scripts: reused TX buffer + `noise`/`chirp`/`both` payload.
 
 ```bash
-python attack.py --mode jam --freq 433920000 --tx-gain 60
+# Channel 433 = 433.92 MHz, hybrid payload, TX until Ctrl+C
+python attack.py --mode jam -ch 433
+
+# Same, explicit
+python attack.py --mode jam --freq 433920000 --payload-mode both --tx-gain 60
 ```
+
+| Flag | B210 reference | Flipper-DA |
+|------|----------------|------------|
+| `-ch 433` | `-ch 6 11` (Wi-Fi) | Sub-GHz: `315 433 868 915` |
+| `--payload-mode both` | `--mode both` | noise / chirp / both / brute |
+| `--bufsize 32768` | `--bufsize 32768` | Reused TX buffer |
+| continuous `writeStream` | `while True: writeStream` | `while True: transmit_samples` |
 
 ### Auto mode (default) — autodetect + brute lock-on jam
 
