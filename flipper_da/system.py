@@ -253,11 +253,36 @@ class FlipperAttackSystem:
         locked_frequency: int | None = None
 
         self.logger.info(
-            "BRUTE AUTO: lock-on sustained jam (hold=%.1fs, chunk=%.2fs, reattack_delay=%.2fs)",
-            self.config.brute_hold_sec,
+            "BRUTE AUTO: continuous gapless TX (chunk=%.2fs, dither=±%d kHz, verify=%s)",
             self.config.brute_chunk_sec,
-            self.config.brute_reattack_delay_sec,
+            self.config.brute_freq_dither_hz // 1000,
+            f"{self.config.brute_verify_interval_sec:.0f}s"
+            if self.config.brute_verify_interval_sec > 0
+            else "disabled",
         )
+
+        def _verify_suppressed(center_hz: int) -> bool:
+            verify_power = self.scanner.scan_frequency(center_hz)
+            threshold = (
+                self.config.detection_threshold_db - self.config.brute_suppression_margin_db
+            )
+            if verify_power is None or verify_power <= threshold:
+                self.logger.info(
+                    "Verify: %.3f MHz quiet (power=%s dB)",
+                    center_hz / 1e6,
+                    f"{verify_power:.1f}" if verify_power is not None else "n/a",
+                )
+                return True
+            self.logger.warning(
+                "Verify: %.3f MHz still active (%.1f dB) — resuming TX",
+                center_hz / 1e6,
+                verify_power,
+            )
+            if not self.rf_manager.configure_tx():
+                self.logger.error("Failed to re-enter TX after verify peek")
+            return False
+
+        verify_cb = _verify_suppressed if self.config.brute_verify_interval_sec > 0 else None
 
         try:
             while True:
@@ -300,7 +325,10 @@ class FlipperAttackSystem:
                         strongest["power_db"],
                     )
 
-                attack_result = self.attack_engine.execute_sustained_attack(locked_frequency)
+                attack_result = self.attack_engine.execute_continuous_brute_lock(
+                    locked_frequency,
+                    verify_callback=verify_cb,
+                )
                 self.attack_results = [attack_result]
                 cycle_summary["attacks"] = [attack_result]
                 cycle_summary["locked_frequency"] = locked_frequency
@@ -310,28 +338,13 @@ class FlipperAttackSystem:
                 else:
                     summary["failed_attacks"] += 1
 
-                verify_power = self.scanner.scan_frequency(locked_frequency)
-                suppress_threshold = (
-                    self.config.detection_threshold_db - self.config.brute_suppression_margin_db
-                )
-
-                if verify_power is None or verify_power <= suppress_threshold:
-                    self.logger.info(
-                        "Target suppressed at %.3f MHz (verify power: %s dB). Releasing lock.",
-                        locked_frequency / 1e6,
-                        f"{verify_power:.1f}" if verify_power is not None else "n/a",
-                    )
+                if attack_result.get("suppressed"):
                     locked_frequency = None
                     cycle_summary["suppressed"] = True
                     summary["suppression_events"] += 1
-                else:
-                    self.logger.warning(
-                        "Target still active at %.3f MHz (%.1f dB). Re-attacking immediately.",
-                        locked_frequency / 1e6,
-                        verify_power,
-                    )
-                    if self.config.brute_reattack_delay_sec > 0:
-                        time.sleep(self.config.brute_reattack_delay_sec)
+                elif attack_result.get("error"):
+                    self.logger.error("Brute error, releasing lock: %s", attack_result["error"])
+                    locked_frequency = None
 
                 cycle_summary["end_time"] = datetime.now().isoformat()
                 cycle_summary["duration_seconds"] = (

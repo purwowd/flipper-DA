@@ -46,8 +46,11 @@ python attack.py --mode auto
 Max aggression (lab only):
 
 ```bash
-python attack.py --brute-hold 30 --brute-chunk 0.1 --tx-gain 60 --gain 50
+python attack.py --freq 433920000 --tx-gain 60 --brute-chunk 0.05 --brute-dither 100000
 ```
+
+**Continuous brute (default):** once locked, TX runs **without RX gaps** until you press `Ctrl+C`.
+Verify scan is **disabled** by default (no more muncul-hilang from RX peek).
 
 Disable brute (short burst attacks instead):
 

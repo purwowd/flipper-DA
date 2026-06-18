@@ -48,6 +48,7 @@ def test_execute_sustained_attack_transmits_multiple_chunks(config, mock_rf):
 
 def test_execute_brute_attack_targets_strongest_only(config, mock_rf):
     config.enable_brute_mode = True
+    config.brute_continuous = False
     config.brute_hold_sec = 0.05
     config.brute_chunk_sec = 0.02
     engine = AttackEngine(mock_rf, config)
@@ -60,6 +61,18 @@ def test_execute_brute_attack_targets_strongest_only(config, mock_rf):
 
     assert len(results) == 1
     assert results[0]["frequency"] == 433_920_000
+
+
+def test_execute_continuous_brute_lock_transmits_many_chunks(config, mock_rf):
+    config.brute_chunk_sec = 0.01
+    config.brute_max_chunks = 5
+    engine = AttackEngine(mock_rf, config)
+
+    result = engine.execute_continuous_brute_lock(433_920_000)
+
+    assert result["success"] is True
+    assert result["mode"] == "brute-continuous"
+    assert result["chunks_transmitted"] == 5
 
 
 def test_execute_adaptive_attack_limits_to_config_targets(config, mock_rf):

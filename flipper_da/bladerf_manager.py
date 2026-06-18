@@ -138,7 +138,7 @@ class BladeRFManager:
             self.logger.error("Failed to configure RX: %s", exc)
             return False
 
-    def set_frequency(self, frequency_hz: int) -> bool:
+    def set_frequency(self, frequency_hz: int, settle_sec: float | None = None) -> bool:
         """Set center frequency on the active RF channel."""
         if not self.is_initialized:
             return False
@@ -150,11 +150,15 @@ class BladeRFManager:
 
         try:
             channel.frequency = frequency_hz
-            time.sleep(self.config.pll_settle_sec)
+            time.sleep(settle_sec if settle_sec is not None else self.config.pll_settle_sec)
             return True
         except Exception as exc:
             self.logger.error("Failed to set frequency %s: %s", frequency_hz, exc)
             return False
+
+    def set_tx_frequency_fast(self, frequency_hz: int) -> bool:
+        """Set TX frequency with minimal PLL settle (for dither hops)."""
+        return self.set_frequency(frequency_hz, settle_sec=self.config.brute_pll_settle_sec)
 
     def receive_samples(self, num_samples: int) -> Optional[np.ndarray]:
         """Receive IQ samples as normalized complex64."""

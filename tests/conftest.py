@@ -34,6 +34,9 @@ class MockRFManager:
         self.current_frequency = frequency_hz
         return True
 
+    def set_tx_frequency_fast(self, frequency_hz: int) -> bool:
+        return self.set_frequency(frequency_hz)
+
     def receive_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if self.rx_generator is None:
             return np.zeros(num_samples, dtype=np.complex64)

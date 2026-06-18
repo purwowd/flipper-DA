@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 import numpy as np
 
@@ -17,6 +17,7 @@ class RFTransceiver(Protocol):
     def configure_tx(self) -> bool: ...
     def configure_rx(self) -> bool: ...
     def set_frequency(self, frequency_hz: int) -> bool: ...
+    def set_tx_frequency_fast(self, frequency_hz: int) -> bool: ...
     def transmit_samples(self, samples: np.ndarray) -> bool: ...
 
 
@@ -65,6 +66,113 @@ class AttackEngine:
         tone_high = self.generate_tone(duration_sec, frequency_offset=75_000)
         mixed = 0.45 * sweep + 0.35 * noise + 0.07 * tone_low + 0.07 * tone_mid + 0.06 * tone_high
         return normalize_signal(mixed, peak=0.99)
+
+    def _dither_offsets(self) -> List[int]:
+        dither = self.config.brute_freq_dither_hz
+        if dither <= 0:
+            return [0]
+        return [-dither, -dither // 2, 0, dither // 2, dither]
+
+    def _set_tx_frequency(self, frequency_hz: int) -> bool:
+        if hasattr(self.rf, "set_tx_frequency_fast"):
+            return self.rf.set_tx_frequency_fast(frequency_hz)
+        return self.rf.set_frequency(frequency_hz)
+
+    def execute_continuous_brute_lock(
+        self,
+        frequency_hz: int,
+        verify_callback: Optional[Callable[[int], bool]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Hammer one target with gapless TX. Stays in TX mode between chunks.
+        Only switches to RX when verify_callback is set and interval elapsed.
+        """
+        chunk_sec = max(0.02, self.config.brute_chunk_sec)
+        dither_offsets = self._dither_offsets()
+        result: Dict[str, Any] = {
+            "frequency": frequency_hz,
+            "frequency_mhz": frequency_hz / 1e6,
+            "start_time": datetime.now().isoformat(),
+            "success": False,
+            "error": None,
+            "mode": "brute-continuous",
+            "chunks_transmitted": 0,
+            "suppressed": False,
+            "dither_hz": self.config.brute_freq_dither_hz,
+        }
+
+        verify_interval = self.config.brute_verify_interval_sec
+        self.logger.warning(
+            "BRUTE CONTINUOUS LOCK %.3f MHz ±%d kHz — TX gapless (verify every %s)",
+            frequency_hz / 1e6,
+            self.config.brute_freq_dither_hz // 1000,
+            f"{verify_interval:.0f}s" if verify_interval > 0 else "never (Ctrl+C to stop)",
+        )
+
+        chunks = 0
+        start_mono = time.monotonic()
+
+        try:
+            if not self.rf.configure_tx():
+                result["error"] = "Failed to configure TX mode"
+                return result
+
+            if not self._set_tx_frequency(frequency_hz):
+                result["error"] = f"Failed to set frequency {frequency_hz}"
+                return result
+
+            last_verify = time.monotonic()
+            chunk_idx = 0
+
+            while True:
+                offset = dither_offsets[chunk_idx % len(dither_offsets)]
+                tx_freq = frequency_hz + offset
+                if offset != 0:
+                    self._set_tx_frequency(tx_freq)
+
+                signal = self.build_brute_signal(chunk_sec)
+                if not self.rf.transmit_samples(signal):
+                    result["error"] = "Transmission failed during continuous brute"
+                    break
+
+                chunks += 1
+                chunk_idx += 1
+
+                if self.config.brute_max_chunks > 0 and chunks >= self.config.brute_max_chunks:
+                    break
+
+                if verify_callback and verify_interval > 0:
+                    if time.monotonic() - last_verify >= verify_interval:
+                        last_verify = time.monotonic()
+                        if verify_callback(frequency_hz):
+                            result["suppressed"] = True
+                            self.logger.info(
+                                "Continuous brute: target suppressed, releasing lock"
+                            )
+                            break
+
+            result["chunks_transmitted"] = chunks
+            result["success"] = chunks > 0 and result["error"] is None
+            result["end_time"] = datetime.now().isoformat()
+            result["duration_seconds"] = time.monotonic() - start_mono
+            self.rf.configure_rx()
+        except KeyboardInterrupt:
+            result["chunks_transmitted"] = chunks
+            result["success"] = chunks > 0
+            result["end_time"] = datetime.now().isoformat()
+            result["duration_seconds"] = time.monotonic() - start_mono
+            self.rf.configure_rx()
+            raise
+        except Exception as exc:
+            result["error"] = str(exc)
+            self.logger.error("Continuous brute error: %s", exc)
+            try:
+                self.rf.configure_rx()
+            except Exception:
+                self.logger.exception("Failed to recover RX after continuous brute")
+
+        self.attack_history.append(result)
+        return result
 
     def execute_attack(self, frequency_hz: int, duration_sec: float | None = None) -> Dict[str, Any]:
         if duration_sec is None:
@@ -218,6 +326,11 @@ class AttackEngine:
         results = []
 
         for signal in sorted_signals[:limit]:
-            results.append(self.execute_sustained_attack(signal["frequency"]))
+            if self.config.brute_continuous:
+                results.append(
+                    self.execute_continuous_brute_lock(signal["frequency"])
+                )
+            else:
+                results.append(self.execute_sustained_attack(signal["frequency"]))
 
         return results

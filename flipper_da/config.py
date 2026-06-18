@@ -53,8 +53,14 @@ class SystemConfig:
     auto_quick_scan: bool = True
     enable_brute_mode: bool = True
     brute_hold_sec: float = 15.0
-    brute_chunk_sec: float = 0.2
+    brute_chunk_sec: float = 0.05
     brute_sweep_bandwidth_hz: float = 1_500_000
     brute_single_target: bool = True
     brute_reattack_delay_sec: float = 0.0
     brute_suppression_margin_db: float = 3.0
+    # Continuous lock: TX without RX gaps (0 = never verify, jam until Ctrl+C)
+    brute_continuous: bool = True
+    brute_verify_interval_sec: float = 0.0
+    brute_freq_dither_hz: int = 75_000
+    brute_pll_settle_sec: float = 0.001
+    brute_max_chunks: int = 0  # 0 = unlimited; set in tests to avoid infinite loops

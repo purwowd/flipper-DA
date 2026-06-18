@@ -127,8 +127,20 @@ Unauthorized transmission on radio frequencies is illegal.
     parser.add_argument(
         "--brute-chunk",
         type=float,
-        default=0.2,
-        help="TX chunk size in seconds during brute hold (default: 0.2)",
+        default=0.05,
+        help="TX chunk size in seconds during brute hold (default: 0.05)",
+    )
+    parser.add_argument(
+        "--brute-dither",
+        type=int,
+        default=75_000,
+        help="Frequency dither +/- Hz around target (default: 75000)",
+    )
+    parser.add_argument(
+        "--brute-verify-interval",
+        type=float,
+        default=0.0,
+        help="RX verify interval in seconds, 0=never (default: 0, jam until Ctrl+C)",
     )
     parser.add_argument(
         "--tx-gain",
@@ -158,6 +170,8 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         enable_brute_mode=not args.no_brute,
         brute_hold_sec=args.brute_hold,
         brute_chunk_sec=args.brute_chunk,
+        brute_freq_dither_hz=args.brute_dither,
+        brute_verify_interval_sec=args.brute_verify_interval,
         tx_gain=args.tx_gain if args.tx_gain is not None else args.gain,
     )
 
