@@ -32,7 +32,7 @@ class MockBladeRFDevice:
             return self.rx_channel
         return self.tx_channel
 
-    def sync_config(self, layout, fmt, num_buffers, buffer_size, num_transfers, stream_timeout):
+    def sync_config(self, layout, fmt, num_buffers, buffer_size, num_transfers, stream_timeout=None):
         self.sync_layout = layout
 
     def close(self):
@@ -45,7 +45,7 @@ def mock_bladerf_module(monkeypatch):
         BladeRF=MockBladeRFDevice,
         CHANNEL_RX=lambda ch: (ch << 1) | 0,
         CHANNEL_TX=lambda ch: (ch << 1) | 1,
-        ChannelLayout=SimpleNamespace(RX_X1="RX_X1", TX_X1="TX_X1"),
+        Direction=SimpleNamespace(RX="RX", TX="TX"),
         Format=SimpleNamespace(SC16_Q11="SC16_Q11"),
     )
     monkeypatch.setattr("flipper_da.bladerf_manager.bladerf", module)
@@ -59,7 +59,7 @@ def test_initialize_configures_rx_before_marking_ready(mock_bladerf_module):
     assert manager.is_initialized is True
     assert manager._active_direction == "rx"
     assert manager.device.rx_channel.enable is True
-    assert manager.device.sync_layout == "RX_X1"
+    assert manager.device.sync_layout == "RX"
 
 
 def test_initialize_fails_when_fpga_not_loaded(mock_bladerf_module):

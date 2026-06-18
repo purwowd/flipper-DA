@@ -8,6 +8,11 @@ from typing import Optional
 
 import numpy as np
 
+from flipper_da.bladerf_compat import (
+    log_binding_info,
+    set_channel_enabled,
+    sync_config,
+)
 from flipper_da.config import SystemConfig
 from flipper_da.rf_utils import (
     complex_to_sc16_q11_interleaved,
@@ -29,6 +34,8 @@ class BladeRFManager:
         self.device: Optional[object] = None
         self.rx_channel: Optional[object] = None
         self.tx_channel: Optional[object] = None
+        self.rx_channel_id: Optional[int] = None
+        self.tx_channel_id: Optional[int] = None
         self.logger = logging.getLogger("BladeRFManager")
         self.is_initialized = False
         self._active_direction: Optional[str] = None
@@ -50,6 +57,7 @@ class BladeRFManager:
             return False
 
         try:
+            log_binding_info(self.logger, bladerf)
             self.device = bladerf.BladeRF(self.device_identifier)
             self.logger.info("BladeRF device opened: %s", self.device.devinfo)
 
@@ -59,8 +67,10 @@ class BladeRFManager:
                 )
                 return False
 
-            self.rx_channel = self.device.Channel(bladerf.CHANNEL_RX(0))
-            self.tx_channel = self.device.Channel(bladerf.CHANNEL_TX(0))
+            self.rx_channel_id = bladerf.CHANNEL_RX(0)
+            self.tx_channel_id = bladerf.CHANNEL_TX(0)
+            self.rx_channel = self.device.Channel(self.rx_channel_id)
+            self.tx_channel = self.device.Channel(self.tx_channel_id)
 
             self._configure_channel(self.rx_channel, self.config.rx_gain)
             self.rx_channel.frequency = 433_000_000
@@ -89,6 +99,8 @@ class BladeRFManager:
         self.device = None
         self.rx_channel = None
         self.tx_channel = None
+        self.rx_channel_id = None
+        self.tx_channel_id = None
         self.is_initialized = False
         self._active_direction = None
 
@@ -101,15 +113,8 @@ class BladeRFManager:
         try:
             self._disable_active_channel()
             self._configure_channel(self.tx_channel, self.config.tx_gain)
-            self.device.sync_config(
-                bladerf.ChannelLayout.TX_X1,
-                bladerf.Format.SC16_Q11,
-                self.config.sync_num_buffers,
-                self.config.sync_buffer_size,
-                self.config.sync_num_transfers,
-                self.config.sync_stream_timeout_ms,
-            )
-            self.tx_channel.enable = True
+            sync_config(self.device, bladerf, "tx", self.config)
+            set_channel_enabled(self.device, self.tx_channel, self.tx_channel_id, True)
             self._active_direction = "tx"
             return True
         except Exception as exc:
@@ -125,15 +130,8 @@ class BladeRFManager:
         try:
             self._disable_active_channel()
             self._configure_channel(self.rx_channel, self.config.rx_gain)
-            self.device.sync_config(
-                bladerf.ChannelLayout.RX_X1,
-                bladerf.Format.SC16_Q11,
-                self.config.sync_num_buffers,
-                self.config.sync_buffer_size,
-                self.config.sync_num_transfers,
-                self.config.sync_stream_timeout_ms,
-            )
-            self.rx_channel.enable = True
+            sync_config(self.device, bladerf, "rx", self.config)
+            set_channel_enabled(self.device, self.rx_channel, self.rx_channel_id, True)
             self._active_direction = "rx"
             return True
         except Exception as exc:
@@ -172,6 +170,16 @@ class BladeRFManager:
             self.device.sync_rx(buffer, num_samples)
             raw = np.frombuffer(buffer, dtype=np.int16)
             return sc16_q11_interleaved_to_complex(raw)
+        except TypeError:
+            # Very old bindings returned samples directly from sync_rx(num_samples)
+            samples = self.device.sync_rx(num_samples)
+            if samples is None:
+                return None
+            if isinstance(samples, np.ndarray):
+                if samples.dtype == np.complex64:
+                    return samples
+                return sc16_q11_interleaved_to_complex(samples)
+            return sc16_q11_interleaved_to_complex(np.asarray(samples, dtype=np.int16))
         except Exception as exc:
             self.logger.error("Receive error: %s", exc)
             return None
@@ -192,7 +200,8 @@ class BladeRFManager:
                 start = offset * 2
                 end = start + count * 2
                 chunk = interleaved[start:end]
-                self.device.sync_tx(chunk.tobytes(), count)
+                payload = chunk.tobytes() if hasattr(chunk, "tobytes") else bytes(chunk)
+                self.device.sync_tx(payload, count)
                 offset += count
 
             return True
@@ -214,7 +223,7 @@ class BladeRFManager:
 
     def _disable_active_channel(self) -> None:
         if self._active_direction == "tx" and self.tx_channel is not None:
-            self.tx_channel.enable = False
+            set_channel_enabled(self.device, self.tx_channel, self.tx_channel_id, False)
         elif self._active_direction == "rx" and self.rx_channel is not None:
-            self.rx_channel.enable = False
+            set_channel_enabled(self.device, self.rx_channel, self.rx_channel_id, False)
         self._active_direction = None
