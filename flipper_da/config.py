@@ -19,6 +19,9 @@ COMMON_FLIPPER_FREQS: List[int] = [
     915_000_000,
 ]
 
+# Default full-jam target (433.92 MHz ISM)
+JAM_433_MHZ_HZ: int = 433_920_000
+
 
 @dataclass
 class SystemConfig:

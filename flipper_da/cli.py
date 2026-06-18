@@ -7,7 +7,7 @@ import logging
 import sys
 from datetime import datetime
 
-from flipper_da.config import SystemConfig
+from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig
 from flipper_da.logging_setup import setup_logging
 from flipper_da.system import FlipperAttackSystem
 
@@ -27,9 +27,9 @@ Unauthorized transmission on radio frequencies is illegal.
     parser.add_argument(
         "--mode",
         "-m",
-        choices=["auto", "detect", "attack", "full"],
+        choices=["auto", "detect", "attack", "full", "jam"],
         default="auto",
-        help="auto: continuous autodetect+attack (default), detect/attack/full: single cycle",
+        help="jam: full continuous TX on 433.92 MHz (or --freq), auto: autodetect+attack",
     )
     parser.add_argument(
         "--threshold",
@@ -153,13 +153,29 @@ Unauthorized transmission on radio frequencies is illegal.
 
 
 def build_config(args: argparse.Namespace) -> SystemConfig:
+    target_freq = args.freq
+    tx_gain = args.tx_gain if args.tx_gain is not None else args.gain
+    enable_brute = not args.no_brute
+    brute_verify = args.brute_verify_interval
+    brute_dither = args.brute_dither
+    brute_chunk = args.brute_chunk
+
+    if args.mode == "jam":
+        target_freq = target_freq or JAM_433_MHZ_HZ
+        enable_brute = True
+        brute_verify = 0.0
+        brute_dither = max(brute_dither, 100_000)
+        brute_chunk = min(brute_chunk, 0.05)
+        if args.tx_gain is None and args.gain == 40:
+            tx_gain = 60
+
     return SystemConfig(
         detection_threshold_db=args.threshold,
         attack_duration_sec=args.duration,
         scan_step_hz=args.scan_step,
         aggressive_scan_step_hz=args.aggressive_scan_step,
         enable_aggressive_scan=args.aggressive_scan,
-        target_frequency_hz=args.freq,
+        target_frequency_hz=target_freq,
         rx_gain=args.gain,
         log_level=args.log_level,
         output_dir=args.output_dir,
@@ -167,12 +183,12 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         auto_max_cycles=args.auto_cycles,
         auto_attack_max_targets=args.auto_targets,
         auto_quick_scan=not args.no_quick_scan,
-        enable_brute_mode=not args.no_brute,
+        enable_brute_mode=enable_brute,
         brute_hold_sec=args.brute_hold,
-        brute_chunk_sec=args.brute_chunk,
-        brute_freq_dither_hz=args.brute_dither,
-        brute_verify_interval_sec=args.brute_verify_interval,
-        tx_gain=args.tx_gain if args.tx_gain is not None else args.gain,
+        brute_chunk_sec=brute_chunk,
+        brute_freq_dither_hz=brute_dither,
+        brute_verify_interval_sec=brute_verify,
+        tx_gain=tx_gain,
     )
 
 
@@ -217,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.mode == "full":
             summary = system.run_full_cycle()
             summary["mode"] = "full"
+        elif args.mode == "jam":
+            summary = system.run_full_jam()
         else:
             summary = system.run_auto_loop()
 
@@ -235,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
             logger.info("Lock events: %s", summary.get("lock_events", 0))
             logger.info("Suppressions: %s", summary.get("suppression_events", 0))
             logger.info("Total brute holds: %s", summary.get("total_attacks", 0))
+        elif summary["mode"] == "jam":
+            logger.info("Jam frequency: %.3f MHz", summary.get("frequency_mhz", 0))
+            logger.info("Chunks transmitted: %s", summary.get("chunks_transmitted", 0))
+            logger.info("Duration: %.1fs", summary.get("duration_seconds", 0))
         else:
             if "detection_count" in summary:
                 logger.info("Signals detected: %s", summary["detection_count"])

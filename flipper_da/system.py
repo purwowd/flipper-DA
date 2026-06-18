@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 
 from flipper_da.attack_engine import AttackEngine
 from flipper_da.bladerf_manager import BladeRFManager
-from flipper_da.config import SystemConfig
+from flipper_da.config import JAM_433_MHZ_HZ, SystemConfig
 from flipper_da.scanner import SpectrumScanner
 
 
@@ -355,6 +355,36 @@ class FlipperAttackSystem:
 
         except KeyboardInterrupt:
             self.logger.info("Brute auto mode stopped by user after %s cycle(s)", cycle_num)
+
+        summary["end_time"] = datetime.now().isoformat()
+        summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()
+        return summary
+
+    def run_full_jam(self) -> Dict[str, Any]:
+        """Full continuous jam on a fixed frequency — no scan, TX until Ctrl+C."""
+        frequency_hz = self.config.target_frequency_hz or JAM_433_MHZ_HZ
+        start_time = datetime.now()
+
+        self.logger.warning(
+            "FULL JAM: continuous TX on %.3f MHz (Ctrl+C to stop)",
+            frequency_hz / 1e6,
+        )
+
+        summary: Dict[str, Any] = {
+            "mode": "jam",
+            "frequency_hz": frequency_hz,
+            "frequency_mhz": frequency_hz / 1e6,
+            "start_time": start_time.isoformat(),
+            "attacks": [],
+        }
+
+        try:
+            attack_result = self.attack_engine.execute_continuous_brute_lock(frequency_hz)
+            summary["attacks"] = [attack_result]
+            summary["successful"] = attack_result.get("success", False)
+            summary["chunks_transmitted"] = attack_result.get("chunks_transmitted", 0)
+        except KeyboardInterrupt:
+            self.logger.info("Full jam stopped by user")
 
         summary["end_time"] = datetime.now().isoformat()
         summary["duration_seconds"] = (datetime.now() - start_time).total_seconds()

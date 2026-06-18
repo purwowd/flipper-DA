@@ -31,6 +31,20 @@ Install BladeRF drivers/bindings from Nuand documentation before running on hard
 
 ## Usage
 
+### Full jam 433.92 MHz (no scan)
+
+Continuous wideband jam **only** on 433.92 MHz until `Ctrl+C`:
+
+```bash
+python attack.py --mode jam
+```
+
+Same as:
+
+```bash
+python attack.py --mode jam --freq 433920000 --tx-gain 60
+```
+
 ### Auto mode (default) — autodetect + brute lock-on jam
 
 Runs continuously with **brute mode** enabled by default:
