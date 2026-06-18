@@ -36,8 +36,11 @@ Install BladeRF drivers/bindings from Nuand documentation before running on hard
 Inspired by SoapySDR/B210 Wi-Fi jam scripts: reused TX buffer + `noise`/`chirp`/`both` payload.
 
 ```bash
-# Channel 433 = 433.92 MHz, hybrid payload, TX until Ctrl+C
+# Channel 433 = 433.92 MHz, hybrid payload, TX until Ctrl+C (no --duration)
 python attack.py --mode jam -ch 433
+
+# Timed jam (optional): stop after 60 seconds
+python attack.py --mode jam -ch 433 --duration 60
 
 # Same, explicit
 python attack.py --mode jam --freq 433920000 --payload-mode both --tx-gain 60

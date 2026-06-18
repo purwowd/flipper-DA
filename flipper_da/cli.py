@@ -42,8 +42,8 @@ Unauthorized transmission on radio frequencies is illegal.
         "--duration",
         "-d",
         type=float,
-        default=3.0,
-        help="Transmission duration in seconds (default: 3.0)",
+        default=None,
+        help="Burst attack duration in sec (default 3). Jam mode: omit = until Ctrl+C",
     )
     parser.add_argument(
         "--scan-step",
@@ -199,13 +199,13 @@ def build_config(args: argparse.Namespace) -> SystemConfig:
         brute_dither = max(brute_dither, 100_000)
         brute_chunk = min(brute_chunk, 0.05)
         payload_mode = args.payload_mode if args.payload_mode != "brute" else "both"
-        jam_duration = args.duration if args.duration > 0 else 0.0
+        jam_duration = args.duration if args.duration is not None else 0.0
         if args.tx_gain is None and args.gain == 40:
             tx_gain = 60
 
     return SystemConfig(
         detection_threshold_db=args.threshold,
-        attack_duration_sec=args.duration,
+        attack_duration_sec=args.duration if args.duration is not None else 3.0,
         scan_step_hz=args.scan_step,
         aggressive_scan_step_hz=args.aggressive_scan_step,
         enable_aggressive_scan=args.aggressive_scan,

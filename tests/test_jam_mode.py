@@ -25,4 +25,5 @@ def test_build_config_jam_mode_defaults():
 
     assert config.target_frequency_hz == JAM_433_MHZ_HZ
     assert config.brute_verify_interval_sec == 0.0
+    assert config.jam_duration_sec == 0.0
     assert config.tx_gain == 60

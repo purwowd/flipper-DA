@@ -366,8 +366,11 @@ class FlipperAttackSystem:
         start_time = datetime.now()
 
         self.logger.warning(
-            "FULL JAM: continuous TX on %.3f MHz (Ctrl+C to stop)",
+            "FULL JAM: continuous TX on %.3f MHz (%s)",
             frequency_hz / 1e6,
+            f"max {self.config.jam_duration_sec:.0f}s"
+            if self.config.jam_duration_sec > 0
+            else "Ctrl+C to stop",
         )
 
         summary: Dict[str, Any] = {
