@@ -1,0 +1,53 @@
+"""Configuration and frequency band definitions."""
+
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+# SC16_Q11: 16-bit signed samples with 11 fractional bits
+SC16_Q11_SCALE = 2048.0
+
+FLIPPER_BANDS: List[Tuple[int, int]] = [
+    (300_000_000, 348_000_000),
+    (387_000_000, 464_000_000),
+    (779_000_000, 928_000_000),
+]
+
+COMMON_FLIPPER_FREQS: List[int] = [
+    315_000_000,
+    433_920_000,
+    868_000_000,
+    915_000_000,
+]
+
+
+@dataclass
+class SystemConfig:
+    """System-wide configuration parameters."""
+
+    sample_rate: int = 2_000_000
+    bandwidth: int = 1_500_000
+    rx_gain: int = 40
+    tx_gain: int = 40
+    # Relative power threshold in dB (not calibrated dBm; see rf_utils.power_to_db)
+    detection_threshold_db: float = -40.0
+    scan_step_hz: int = 1_000_000
+    aggressive_scan_step_hz: int = 100_000
+    scan_duration_ms: float = 10.0
+    attack_duration_sec: float = 3.0
+    noise_amplitude: float = 0.5
+    enable_aggressive_scan: bool = False
+    log_level: str = "INFO"
+    output_dir: str = "logs"
+    # Optional manual target frequency (Hz) for detect/attack modes
+    target_frequency_hz: Optional[int] = None
+    sync_num_buffers: int = 16
+    sync_buffer_size: int = 8192
+    sync_num_transfers: int = 8
+    sync_stream_timeout_ms: int = 3500
+    pll_settle_sec: float = 0.005
+    tx_chunk_samples: int = 8192
+    # Auto mode: continuous detect -> attack loop
+    auto_interval_sec: float = 2.0
+    auto_max_cycles: int = 0  # 0 = run until Ctrl+C
+    auto_attack_max_targets: int = 3
+    auto_quick_scan: bool = True
