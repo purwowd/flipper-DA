@@ -103,6 +103,8 @@ def apply_jam_ultra_preset(config: SystemConfig) -> SystemConfig:
     config.brute_sweep_bandwidth_hz = max(config.brute_sweep_bandwidth_hz, 1_500_000)
     config.noise_amplitude = 1.0
     config.bandwidth = max(config.bandwidth, 1_500_000)
-    config.tx_gain = max(config.tx_gain, 60)
+    # Only bump factory-default gain; never cap user-supplied --tx-gain
+    if config.tx_gain == 40:
+        config.tx_gain = 60
     config.brute_pll_settle_sec = 0.0005
     return config

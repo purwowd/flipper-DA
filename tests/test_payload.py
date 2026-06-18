@@ -23,6 +23,15 @@ def test_generate_payload_modes(config, mock_rf):
         assert np.max(np.abs(buf)) <= 0.99 + 1e-5
 
 
+def test_build_config_jam_respects_high_tx_gain():
+    from flipper_da.cli import build_config, parse_arguments
+
+    config = build_config(parse_arguments(["--mode", "jam", "-ch", "433", "--tx-gain", "73"]))
+
+    assert config.tx_gain == 73
+    assert config.ultra_brute is True
+
+
 def test_build_config_jam_with_channel_code():
     from flipper_da.cli import build_config, parse_arguments
 

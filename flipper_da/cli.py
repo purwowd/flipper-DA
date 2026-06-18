@@ -95,7 +95,7 @@ Unauthorized transmission on radio frequencies is illegal.
         "-g",
         type=int,
         default=40,
-        help="RF gain in dB, range -15 to 60 (default: 40)",
+        help="RX gain in dB (default: 40)",
     )
     parser.add_argument(
         "--log-level",
@@ -172,7 +172,7 @@ Unauthorized transmission on radio frequencies is illegal.
         "--tx-gain",
         type=int,
         default=None,
-        help="TX gain in dB (default: same as --gain)",
+        help="TX gain in dB, no software cap — set per your BladeRF hardware (default: same as --gain)",
     )
 
     return parser.parse_args(argv)
