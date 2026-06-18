@@ -33,6 +33,14 @@ class BladeRFManager:
         self.is_initialized = False
         self._active_direction: Optional[str] = None
 
+    def _is_open(self) -> bool:
+        """True when the device handle and channels are available."""
+        return (
+            self.device is not None
+            and self.rx_channel is not None
+            and self.tx_channel is not None
+        )
+
     def initialize(self) -> bool:
         """Open and configure the BladeRF device for RX."""
         if bladerf is None:
@@ -45,6 +53,12 @@ class BladeRFManager:
             self.device = bladerf.BladeRF(self.device_identifier)
             self.logger.info("BladeRF device opened: %s", self.device.devinfo)
 
+            if hasattr(self.device, "fpga_configured") and not self.device.fpga_configured:
+                self.logger.error(
+                    "BladeRF FPGA is not loaded. Run: bladeRF-cli -l <path/to/hostedxA4.rbf>"
+                )
+                return False
+
             self.rx_channel = self.device.Channel(bladerf.CHANNEL_RX(0))
             self.tx_channel = self.device.Channel(bladerf.CHANNEL_TX(0))
 
@@ -52,6 +66,7 @@ class BladeRFManager:
             self.rx_channel.frequency = 433_000_000
 
             if not self.configure_rx():
+                self.logger.error("Failed to configure RX during initialization")
                 return False
 
             self.is_initialized = True
@@ -79,8 +94,8 @@ class BladeRFManager:
 
     def configure_tx(self) -> bool:
         """Configure device for transmission mode."""
-        if not self.is_initialized or self.device is None or self.tx_channel is None:
-            self.logger.error("Device not initialized")
+        if not self._is_open() or self.tx_channel is None:
+            self.logger.error("BladeRF device is not open")
             return False
 
         try:
@@ -103,8 +118,8 @@ class BladeRFManager:
 
     def configure_rx(self) -> bool:
         """Configure device for reception mode."""
-        if not self.is_initialized or self.device is None or self.rx_channel is None:
-            self.logger.error("Device not initialized")
+        if not self._is_open() or self.rx_channel is None:
+            self.logger.error("BladeRF device is not open")
             return False
 
         try:
